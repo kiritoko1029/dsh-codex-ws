@@ -1,0 +1,10 @@
+# GPT (Codex backend) WebSocket mode for the OpenAI channel.
+# Every field is optional; empty values fall back to ~/.codex/config.toml
+# (model_providers.* with supports_websockets = true), then to the plugin defaults.
+- insert:
+    - id: codex-ws
+      name: 'dsh-codex-ws'
+      config:
+        # 'websocket' (WS 模式, openai 渠道原地拦截) | 'sse' (流式, 不拦截)
+        # | 'auto' (WS 优先, 连接失败回退流式)
+        transport: websocket
