@@ -76,7 +76,7 @@ async function* interceptedStream(options, runtime, resolvePath) {
   const { body, requestId } = buildCreateBody(settings, projected, { transport })
   const mapper = new ResponseStreamMapper()
   try {
-    for await (const event of runTransport(settings, transport, { body, requestId, signal: options.signal })) {
+    for await (const event of runTransport(settings, transport, { body, requestId, sessionId: options.sessionId, signal: options.signal })) {
       for (const chunk of mapper.handleEvent(event)) yield chunk
     }
     if (!mapper.completed) {

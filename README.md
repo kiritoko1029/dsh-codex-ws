@@ -17,7 +17,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/kiritoko1029/dsh-codex-ws/releases) 下载 `dsh-codex-ws-1.1.0.tgz`，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
+从 [GitHub Releases](https://github.com/kiritoko1029/dsh-codex-ws/releases) 下载 `dsh-codex-ws-1.2.0.tgz`，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
 
 ## 使用
 
@@ -27,5 +27,9 @@
 
 ## 说明
 
-- WS 模式每次请求仍发送完整上下文（`store: false`，带 `prompt_cache_key` 命中中转站缓存），不使用 `previous_response_id` 续传，因此与现有会话/重放完全兼容；WS 的低延迟收益来自连接复用与中转站转发路径。
+- **v1.2.0 增量 WS**：首次全量发送；同一会话、同一连接上，只有当前历史严格延续上次输入与已完成输出，且 instructions / tools / model 等请求配置未变时，才使用 `previous_response_id` 并只发送新增 input。仍保持 `store: false`。
+- 连接按完整凭据哈希、端点、会话隔离；并发调用独占连接，不共享正在执行的续传状态。空闲 3 分钟或连接总寿命 50 分钟后关闭，全局最多保留 32 个空闲连接。
+- 历史压缩、编辑、分支、模型或提示/工具配置变化、连接丢失时自动使用全量。明确收到上一响应不存在错误、且还没有输出时，只允许一次新连接全量重试；已发送后遇到普通网络错误不会盲目重发。取消、未完成、失败结果不保存续传状态。
+- 工具 schema 和 instructions 仍随每次请求发送；优化减少历史 input 上传量，不减少模型实际上下文长度，也不保证同等比例的计费下降。DSH 若每一步改写早期历史或系统提示，会触发保守全量发送。
+- 验证：`node test/continuation.mjs` 为离线边界测试；`bun test/continuation-live.mjs` 使用合成消息验证中转站续传与实际发送字节（会产生少量 API 调用）。一次实测为 14,242 → 511 字节，第二轮正确回忆第一轮标记；真实降幅取决于历史与固定请求配置大小。
 - Key 只在 Host 侧使用，浏览器端只拿到 `/codex-ws/state` 返回的开关状态与端点地址（不含 Key）。

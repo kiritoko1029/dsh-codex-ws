@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ws",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "GPT models over the Codex-style Responses WebSocket transport (like Codex CLI 'supports_websockets'), toggled in place on the openai channel with an in-composer WS/SSE button shown only for OpenAI models.",
   "private": true,
   "repository": { "type": "git", "url": "https://github.com/kiritoko1029/dsh-codex-ws.git" },
