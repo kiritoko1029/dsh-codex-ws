@@ -65,7 +65,7 @@ async function* interceptedStream(options, runtime, resolvePath) {
       reason: {
         kind: 'error',
         failure: {
-          message: `codex-ws: no API key for the WS transport; set the key on the plugin's config page (or ${settings.apiKeyEnv} / ~/.codex/config.toml), or flip the composer toggle back to SSE`,
+          message: `codex-ws: no API key for the plugin Responses transport; set the key on the plugin's config page (or ${settings.apiKeyEnv} / ~/.codex/config.toml), or disable Fast and switch to SSE`,
           code: 'MISSING_CREDENTIAL',
         },
       },
@@ -108,25 +108,30 @@ async function* interceptedStream(options, runtime, resolvePath) {
 
 export function apply(ctx, config) {
   const connection = Reflect.get(ctx, 'connection')
-  const state = { override: null }
+  const state = { override: null, fast: false }
 
   const loadState = () => {
     const stored = readState()
     state.override = TRANSPORTS.includes(stored.transport) ? stored.transport : null
+    state.fast = stored.fast === true
   }
   loadState()
 
   /** Live settings plus the effective transport for the next request. */
   const runtime = () => {
-    const settings = resolveSettings(config)
+    const settings = { ...resolveSettings(config), fast: state.fast }
     const transport = state.override ?? settings.transport
     return { settings, transport }
   }
 
-  const persistTransport = (transport) => {
+  const persistState = (patch) => {
+    const transport = patch.transport ?? state.override
+    const fast = patch.fast ?? state.fast
+    // Commit memory only after persistence succeeds; partial updates preserve the other toggle.
+    writeState({ ...(transport !== null ? { transport } : {}), fast })
     state.override = transport
-    writeState({ transport })
-    if (transport !== 'websocket' && transport !== 'auto') closeIdleSockets()
+    state.fast = fast
+    if (transport === 'sse') closeIdleSockets()
   }
 
   /** Execution-world read path for a file attachment, when one is resolvable. */
@@ -148,7 +153,9 @@ export function apply(ctx, config) {
   ctx.on('llm/stream', (options, next) => {
     if (options?.provider !== TARGET_PROVIDER) return next()
     const { settings, transport } = runtime()
-    if (transport === 'sse' || settings.apiKey.length === 0) return next()
+    if (transport === 'sse' && !settings.fast) return next()
+    // Do not silently drop an explicitly requested priority tier when credentials are missing.
+    if (settings.apiKey.length === 0 && !settings.fast) return next()
     return interceptedStream(options, { settings, transport }, fileReadPath)
   })
 
@@ -172,6 +179,7 @@ export function apply(ctx, config) {
     return {
       provider: TARGET_PROVIDER,
       transport,
+      fast: settings.fast,
       endpoint: { baseURL: settings.baseURL, hasKey: settings.apiKey.length > 0 },
       providerAvailable,
       defaultProvider,
@@ -232,12 +240,28 @@ export function apply(ctx, config) {
               return
             }
             const body = JSON.parse(await readBody(req))
-            const transport = String(body?.transport ?? '').toLowerCase()
-            if (!TRANSPORTS.includes(transport)) {
-              sendJson(res, 400, { error: `transport must be one of ${TRANSPORTS.join(', ')}` })
+            if (!body || typeof body !== 'object' || Array.isArray(body) ||
+                (!Object.hasOwn(body, 'transport') && !Object.hasOwn(body, 'fast'))) {
+              sendJson(res, 400, { error: 'transport or fast is required' })
               return
             }
-            persistTransport(transport)
+            const patch = {}
+            if (Object.hasOwn(body, 'transport')) {
+              const transport = typeof body.transport === 'string' ? body.transport.toLowerCase() : ''
+              if (!TRANSPORTS.includes(transport)) {
+                sendJson(res, 400, { error: `transport must be one of ${TRANSPORTS.join(', ')}` })
+                return
+              }
+              patch.transport = transport
+            }
+            if (Object.hasOwn(body, 'fast')) {
+              if (typeof body.fast !== 'boolean') {
+                sendJson(res, 400, { error: 'fast must be a boolean' })
+                return
+              }
+              patch.fast = body.fast
+            }
+            persistState(patch)
             sendJson(res, 200, publicState())
           } catch (error) {
             if (!res.headersSent) sendJson(res, 400, { error: error?.message ?? 'bad request' })

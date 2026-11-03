@@ -49,6 +49,7 @@ window.__ModuleLoader__.load({
       style.textContent = [
         '.dsh-codex-ws-btn{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px;border-radius:9999px;border:1px solid color-mix(in srgb,currentColor 28%,transparent);background:transparent;color:inherit;font-size:11px;font-weight:600;line-height:1;cursor:pointer;user-select:none;transition:opacity .15s,background .15s,border-color .15s;white-space:nowrap}',
         '.dsh-codex-ws-btn:hover{border-color:color-mix(in srgb,currentColor 55%,transparent)}',
+        '.dsh-codex-ws-btn:focus-visible{outline:2px solid currentColor;outline-offset:2px}',
         '.dsh-codex-ws-btn[data-pending="true"]{opacity:.55;cursor:wait}',
         '.dsh-codex-ws-btn[data-mode="websocket"]{background:color-mix(in srgb,#10a37f 16%,transparent);border-color:color-mix(in srgb,#10a37f 55%,transparent);color:#10a37f}',
         '.dsh-codex-ws-btn[data-mode="websocket"]:hover{background:color-mix(in srgb,#10a37f 26%,transparent)}',
@@ -93,16 +94,18 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      const toggle = useCallback(async () => {
+      const toggle = useCallback(async (field) => {
         if (!state || pending) return
-        const next = state.transport === 'sse' ? 'websocket' : 'sse'
+        const patch = field === 'fast'
+          ? { fast: state.fast !== true }
+          : { transport: state.transport === 'sse' ? 'websocket' : 'sse' }
         setPending(true)
         setError(false)
         try {
           const response = await fetch(STATE_ROUTE, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ transport: next }),
+            body: JSON.stringify(patch),
           })
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
           const data = await response.json()
@@ -144,9 +147,9 @@ window.__ModuleLoader__.load({
       const keyHint = state.endpoint?.hasKey === false ? '（尚未解析到 API Key，WS 不会生效）' : ''
       const title =
         state.transport === 'sse'
-          ? `SSE 流式（openai 渠道直连）· 点击让 OpenAI 模型改走 WS 模式${host ? `（${host}）` : ''}${keyHint}`
+          ? `SSE 流式（${state.fast ? 'Fast：插件 Responses 接口，仅文本' : 'openai 渠道直连'}）· 点击让 OpenAI 模型改走 WS 模式${host ? `（${host}）` : ''}${keyHint}`
           : `WS 模式 · OpenAI 模型经 ${host || '中转站'} WebSocket 传输 · 点击切回 SSE 流式${keyHint}`
-      return h(
+      return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, h(
         'button',
         {
           type: 'button',
@@ -155,11 +158,24 @@ window.__ModuleLoader__.load({
           'data-pending': pending ? 'true' : 'false',
           'data-error': error ? 'true' : 'false',
           title,
-          onClick: toggle,
+          disabled: pending,
+          'aria-pressed': state.transport !== 'sse',
+          onClick: () => toggle('transport'),
         },
         ICONS[mode],
         error ? '!' : mode === 'ws' ? 'WS' : 'SSE',
-      )
+      ), h('button', {
+        type: 'button',
+        className: 'dsh-codex-ws-btn',
+        'data-mode': state.fast === true ? 'websocket' : 'sse',
+        'data-pending': pending ? 'true' : 'false',
+        'data-error': error ? 'true' : 'false',
+        'aria-pressed': state.fast === true,
+        'aria-label': 'Fast 模式',
+        disabled: pending,
+        title: `Fast 模式${state.fast === true ? '已开启 · 点击关闭' : '已关闭 · 点击开启'}：优先处理（service_tier=priority），可能额外计费，需中转站支持。全局生效，下一次请求使用；SSE 下使用插件 Responses 接口（仅文本）。`,
+        onClick: () => toggle('fast'),
+      }, ICONS.ws, 'Fast'))
     }
 
     /** Wrap any {subscribe,getSnapshot} source into a referentially stable provider snapshot. */
