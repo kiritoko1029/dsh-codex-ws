@@ -26,7 +26,23 @@ WS / SSE 按钮旁新增独立 **Fast** 按钮，默认关闭，开启后高亮�
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/kiritoko1029/dsh-codex-ws/releases) 下载 `dsh-codex-ws-1.3.0.tgz`，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
+npm 发布完成后，可运行 `npm pack dsh-codex-ws@1.3.0 --registry=https://registry.npmjs.org` 获取安装包，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
+
+## npm 发布维护
+
+仓库使用 `.github/workflows/publish.yml`，在推送 `v*` 标签时校验标签与版本一致、运行离线测试，再通过 GitHub Actions OIDC 发布到 npm。不配置长期 `NPM_TOKEN`。手动重试时必须选择对应版本标签，分支上的手动运行不会发布。
+
+首次发布需要维护者通过 `npm login --registry=https://registry.npmjs.org` 登录并执行 `npm publish --access public` 创建包。随后在 npm 包 Settings → Trusted Publisher 中选择 GitHub Actions：
+
+- Organization or user：`kiritoko1029`
+- Repository：`dsh-codex-ws`
+- Workflow filename：`publish.yml`（不含目录）
+- Environment name：留空
+- Allowed actions：允许 `npm publish`
+
+后续升级版本、提交并推送匹配版本的标签即可自动发布。不要再次发布已存在的 npm 版本。Trusted Publisher 配置完成不等于验证成功，应以一次实际 OIDC 发布成功为准；新绑定若有到期提示，按 npm 要求及时完成首次验证。
+
+参考：[npm Trusted Publishing 文档](https://docs.npmjs.com/trusted-publishers/)。
 
 ## 使用
 
