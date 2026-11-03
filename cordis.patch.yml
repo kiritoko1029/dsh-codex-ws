@@ -1,6 +1,6 @@
 # GPT (Codex backend) WebSocket mode for the OpenAI channel.
-# Every field is optional; empty values fall back to ~/.codex/config.toml
-# (model_providers.* with supports_websockets = true), then to the plugin defaults.
+# Leave endpoint/credential fields empty to inherit the DSH OpenAI provider.
+# Explicit overrides require both an endpoint and credentials; no Codex CLI fallback.
 - insert:
     - id: codex-ws
       name: 'dsh-codex-ws'

@@ -1,5 +1,5 @@
 /**
- * Protocol smoke test: resolve the endpoint from ~/.codex/config.toml via the plugin's
+ * Protocol smoke test: explicitly set CODEX_WS_TEST_BASE_URL and CODEX_WS_TEST_API_KEY for the plugin's
  * own config resolver, run one tiny response over WebSocket, then one over SSE, and
  * print the event sequence plus the mapped harness chunks. Run: node test/probe.mjs [ws|sse]
  */
@@ -7,9 +7,10 @@ import { resolveSettings } from '../lib/config.js'
 import { buildCreateBody, ResponseStreamMapper } from '../lib/responses.js'
 import { runTransport } from '../lib/transport.js'
 
-const settings = resolveSettings({})
+const settings = resolveSettings({ baseURL: process.env.CODEX_WS_TEST_BASE_URL, apiKeyEnv: 'CODEX_WS_TEST_API_KEY' })
+if (settings.configurationError) throw new Error(settings.configurationError)
 const transport = process.argv[2] === 'sse' ? 'sse' : 'websocket'
-console.log(`endpoint: ${settings.sseUrl}  key: ${settings.apiKey.slice(0, 6)}…${settings.apiKey.slice(-4)}  transport: ${transport}`)
+console.log(`endpoint: ${settings.sseUrl}  hasKey: ${Boolean(settings.apiKey)}  transport: ${transport}`)
 
 const options = {
   provider: 'openai',

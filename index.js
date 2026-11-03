@@ -5,8 +5,8 @@
  * harness `llm/stream` waterfall for the existing `openai` provider: while the
  * transport toggle is on (websocket / auto), those requests speak the Responses
  * protocol over WebSocket ("WS 模式", Codex CLI `supports_websockets`) against the
- * relay the local Codex CLI uses (base URL + bearer token resolved from this
- * plugin's config, then ~/.codex/config.toml, then defaults). SSE mode passes the
+ * current DSH OpenAI endpoint and credentials (or a complete explicit plugin
+ * override). No Codex CLI configuration is read. SSE mode passes the
  * request through to the normal openai adapter untouched, so OpenAI models stay a
  * single channel and non-OpenAI models never see the toggle at all.
  *
@@ -19,12 +19,12 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { Config, resolveSettings, TARGET_PROVIDER, TRANSPORTS } from './lib/config.js'
+import { Config, resolveSettings, hasOverride, TARGET_PROVIDER, TRANSPORTS } from './lib/config.js'
 import { ResponseStreamMapper, buildCreateBody, projectOptions, abortedFinish, errorFinish } from './lib/responses.js'
 import { runTransport, closeIdleSockets, TransportError } from './lib/transport.js'
 
 export const name = 'codex-ws'
-export const inject = ['llm', 'webServer', 'connection']
+export const inject = ['llm', 'webServer', 'connection', 'settings']
 export { Config }
 
 const STATE_PATH = '/codex-ws/state'
@@ -57,16 +57,16 @@ function writeState(state) {
 // ---------------------------------------------------------------------------------------------
 
 /** One openai-provider request over the Codex-style transport; yields harness chunks. */
-async function* interceptedStream(options, runtime, resolvePath) {
-  const { settings, transport } = runtime
-  if (settings.apiKey.length === 0) {
+async function* interceptedStream(options, resolveRuntime, resolvePath) {
+  const { settings, transport } = await resolveRuntime()
+  if (settings.configurationError) {
     yield {
       type: 'finish',
       reason: {
         kind: 'error',
         failure: {
-          message: `codex-ws: no API key for the plugin Responses transport; set the key on the plugin's config page (or ${settings.apiKeyEnv} / ~/.codex/config.toml), or disable Fast and switch to SSE`,
-          code: 'MISSING_CREDENTIAL',
+          message: settings.configurationError,
+          code: 'INVALID_CONFIGURATION',
         },
       },
     }
@@ -117,11 +117,86 @@ export function apply(ctx, config) {
   }
   loadState()
 
-  /** Live settings plus the effective transport for the next request. */
-  const runtime = () => {
-    const settings = { ...resolveSettings(config), fast: state.fast }
-    const transport = state.override ?? settings.transport
-    return { settings, transport }
+  /**
+   * The DSH OpenAI provider's live endpoint and bearer credential, resolved the
+   * same way the pi-ai adapter resolves them: the configurable-provider
+   * directory names the settings namespace and profile path; the profile holds
+   * an optional baseURL (falling back to the route's catalog default) and an
+   * apiKeyEnv credential reference resolved through the credentials service
+   * (with the launch environment as a secondary source). Re-read per request
+   * so channel edits apply without a restart; every failure is contained and
+   * surfaces as the inherited-mode configuration error.
+   */
+  const inheritedProvider = async () => {
+    try {
+      const entry = ctx.llm.listConfigurableProviders().find((provider) => provider.provider === TARGET_PROVIDER)
+      if (!entry) return {}
+      let profile = {}
+      try {
+        const namespace = ctx.settings
+          ?.describe({ redactSecrets: true })
+          .find((candidate) => candidate.ns === entry.settingsNs)
+        let value = namespace?.value
+        for (const key of entry.settingsPath ?? []) value = value?.[key]
+        profile = value !== null && typeof value === 'object' ? value : {}
+      } catch {
+        /* settings service unavailable: fall back to the catalog default */
+      }
+      const baseURL = typeof profile.baseURL === 'string' ? profile.baseURL.trim() : ''
+      const reference = typeof profile.apiKeyEnv === 'string' ? profile.apiKeyEnv.trim() : ''
+      let apiKey = ''
+      if (reference) {
+        // Bare `ctx.credentials` throws on the Cordis context proxy when the
+        // service is not in this plugin's inject list ("cannot get property
+        // without inject"); ctx.get is the supported inject-free accessor and
+        // matches how llm-pi-ai itself reaches the credentials service.
+        let credentials
+        try {
+          credentials = typeof ctx.get === 'function' ? ctx.get('credentials') : undefined
+        } catch {
+          /* this composition mounts no credential plane */
+        }
+        try {
+          const resolved = credentials === undefined ? undefined : await credentials.resolve?.(reference)
+          if (typeof resolved?.value === 'string') apiKey = resolved.value.trim()
+        } catch {
+          /* an unresolvable reference surfaces as the inherited-mode error */
+        }
+        if (apiKey.length === 0) {
+          // Ambient fallback mirrors the adapter: the launch-environment
+          // snapshot (process / project .env / user .env layers), with raw
+          // process.env as the last resort for compositions without either.
+          let ambient
+          try {
+            const environment = typeof ctx.get === 'function' ? ctx.get('launchEnvironment') : undefined
+            ambient = environment?.get?.(reference)?.value
+          } catch {
+            /* optional service */
+          }
+          apiKey = (ambient ?? process.env[reference] ?? '').trim()
+        }
+      }
+      return {
+        baseURL: baseURL || (typeof entry.defaultBaseURL === 'string' ? entry.defaultBaseURL.trim() : ''),
+        apiKey,
+      }
+    } catch {
+      return {}
+    }
+  }
+
+  /** Sync transport/fast decision for the next request; never touches credentials. */
+  const runtimeSync = () => {
+    const { transport } = resolveSettings(config, {})
+    return { transport: state.override ?? transport, fast: state.fast }
+  }
+
+  /** Live settings plus the effective transport; the inherited endpoint and
+   * credential resolve asynchronously through the DSH services. */
+  const runtime = async () => {
+    const provider = hasOverride(config) ? {} : await inheritedProvider()
+    const settings = { ...resolveSettings(config, provider), fast: state.fast }
+    return { settings, transport: state.override ?? settings.transport }
   }
 
   const persistState = (patch) => {
@@ -152,15 +227,15 @@ export function apply(ctx, config) {
    */
   ctx.on('llm/stream', (options, next) => {
     if (options?.provider !== TARGET_PROVIDER) return next()
-    const { settings, transport } = runtime()
-    if (transport === 'sse' && !settings.fast) return next()
-    // Do not silently drop an explicitly requested priority tier when credentials are missing.
-    if (settings.apiKey.length === 0 && !settings.fast) return next()
-    return interceptedStream(options, { settings, transport }, fileReadPath)
+    const { transport, fast } = runtimeSync()
+    if (transport === 'sse' && !fast) return next()
+    // Fail closed for incomplete overrides or unavailable inherited configuration.
+    // Never silently change endpoint, account, or requested transport.
+    return interceptedStream(options, runtime, fileReadPath)
   })
 
-  const publicState = () => {
-    const { settings, transport } = runtime()
+  const publicState = async () => {
+    const { settings, transport } = await runtime()
     let providerAvailable = true
     try {
       providerAvailable = ctx.llm.listProviders().some((provider) => provider.id === TARGET_PROVIDER)
@@ -230,7 +305,7 @@ export function apply(ctx, config) {
           try {
             if (rejected(req, res)) return
             if (req.method === 'GET') {
-              sendJson(res, 200, publicState())
+              sendJson(res, 200, await publicState())
               return
             }
             if (req.method !== 'POST') {
@@ -262,7 +337,7 @@ export function apply(ctx, config) {
               patch.fast = body.fast
             }
             persistState(patch)
-            sendJson(res, 200, publicState())
+            sendJson(res, 200, await publicState())
           } catch (error) {
             if (!res.headersSent) sendJson(res, 400, { error: error?.message ?? 'bad request' })
             else res.end()

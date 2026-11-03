@@ -1,10 +1,10 @@
 {
   "name": "dsh-codex-ws",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "GPT models over the Codex-style Responses WebSocket transport (like Codex CLI 'supports_websockets'), toggled in place on the openai channel with an in-composer WS/SSE button shown only for OpenAI models.",
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "scripts": {
-    "test": "node test/client.mjs && node test/fast.mjs && node test/projection.mjs && node test/continuation.mjs && DSH_HOME=$(mktemp -d) OPENAI_API_KEY=test-only node test/intercept.mjs"
+    "test": "node test/config.mjs && node test/client.mjs && node test/fast.mjs && node test/projection.mjs && node test/continuation.mjs && DSH_HOME=$(mktemp -d) node test/intercept.mjs"
   },
   "repository": { "type": "git", "url": "https://github.com/kiritoko1029/dsh-codex-ws.git" },
   "homepage": "https://github.com/kiritoko1029/dsh-codex-ws#readme",

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Codex WS",
-    "description": "GPT 模型走 Codex 风格的 Responses WebSocket 传输（对应 Codex CLI 的 supports_websockets）：不注册额外渠道，直接在 openai 渠道上拦截生效，接口地址与 Key 自动沿用本地 Codex CLI 配置（~/.codex/config.toml）；输入框模型选择器旁的 WS/SSE 按钮仅在当前模型为 OpenAI 时出现。"
+    "description": "GPT 模型走 Codex 风格的 Responses WebSocket 传输（对应 Codex CLI 的 supports_websockets）：不注册额外渠道，直接在 openai 渠道上拦截生效，接口地址与 Key 默认沿用 DSH 的 OpenAI 渠道配置，插件可显式成对覆盖，不自动读取 Codex CLI 配置；输入框模型选择器旁的 WS/SSE 按钮仅在当前模型为 OpenAI 时出现。"
   }
 }

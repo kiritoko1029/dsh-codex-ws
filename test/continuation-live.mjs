@@ -16,7 +16,8 @@ globalThis.WebSocket = class extends NativeWebSocket {
     return super.send(data)
   }
 }
-const settings = resolveSettings({})
+const settings = resolveSettings({ baseURL: process.env.CODEX_WS_TEST_BASE_URL, apiKeyEnv: 'CODEX_WS_TEST_API_KEY' })
+if (settings.configurationError) throw new Error(settings.configurationError)
 const sessionId = `incremental-test-${randomUUID()}`
 const marker = `orchid-${randomUUID().slice(0, 8)}`
 const messages = [{ role: 'user', content: [{ type: 'text', text: `Remember the marker ${marker}. Reply with only ACK. Background padding: ${'Synthetic context for transport verification. '.repeat(300)}` }] }]
