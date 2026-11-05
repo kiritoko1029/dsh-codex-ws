@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Codex WS",
-    "description": "GPT models over the Codex-style Responses WebSocket transport (Codex CLI's supports_websockets): no extra model channel — the openai provider is intercepted in place, with the endpoint and key inherited from the DSH OpenAI provider by default. Explicit plugin overrides require both an endpoint and credentials; local Codex CLI config is not read. The composer WS/SSE button appears only while the current model is an OpenAI one."
+    "description": "Intercepts the OpenAI provider to support Responses WebSocket mode, aiming to reduce time to first token and 503 errors when reconnecting to the official API, with an optional Fast mode."
   }
 }

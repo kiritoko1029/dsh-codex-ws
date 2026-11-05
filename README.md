@@ -28,7 +28,19 @@ WS / SSE 按钮旁新增独立 **Fast** 按钮，默认关闭，开启后高亮�
 
 ## 安装
 
-可运行 `npm pack dsh-codex-ws@1.3.1 --registry=https://registry.npmjs.org` 获取安装包，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
+可运行 `npm pack dsh-codex-ws@1.3.2 --registry=https://registry.npmjs.org` 获取安装包，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
+
+## 界面预览
+
+![DSH 实际输入框中的 WS/SSE 与 Fast 开关及功能说明](assets/codex-ws-real-ui.png)
+
+图片基于真实 DSH 截图裁剪与放大。WS 连接复用旨在降低首字延迟、减少官方 API 的 503 重连报错；实际效果取决于网络与服务端。Fast 请求优先处理，需服务端支持，可能额外计费。
+
+### v1.3.2 更新说明
+
+- 更新中英文插件描述，说明首字延迟、503 重连报错与可选 Fast 模式。
+- 添加真实 DSH 界面说明图及 `screenshots.json`，供插件市场采集展示。
+- 本次仅更新描述、文档和展示素材，不改变运行时行为。
 
 ### v1.3.1 升级说明
 
