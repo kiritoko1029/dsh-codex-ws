@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Codex WS",
-    "description": "Intercepts the OpenAI provider to support Responses WebSocket mode, aiming to reduce time to first token and 503 errors when reconnecting to the official API, with an optional Fast mode."
+    "description": "Supports GPT models on OpenAI and compatible third-party providers using each provider's own endpoint and credentials for Responses WebSocket mode, aiming to reduce time to first token and 503 errors when reconnecting to the official API, with an optional Fast mode."
   }
 }

@@ -1,8 +1,8 @@
 /**
  * Client half of dsh-codex-ws: a compact WS/SSE toggle in the composer toolbar
- * (`conversation.input.right`, next to the model selector). It renders ONLY while
- * the session's current model sits on the `openai` provider — the transport it
- * flips belongs to those models, so every other provider never sees the button.
+ * (`conversation.input.right`, next to the model selector). It renders for the
+ * OpenAI route and GPT models on compatible third-party routes advertised by the
+ * Host. The selected route supplies its own endpoint and credential.
  * It reads and writes the plugin's Host state at GET/POST /codex-ws/state; the
  * API key never reaches the browser.
  */
@@ -14,8 +14,8 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useCallback, useSyncExternalStore } = React
 
     const STATE_ROUTE = 'codex-ws/state'
-    const CACHE_KEY = 'dsh-codex-ws:v3'
-    const TARGET_PROVIDER = 'openai'
+    const CACHE_KEY = 'dsh-codex-ws:v4'
+    const isGptModel = (model) => typeof model === 'string' && /(^|\/)gpt(?:-|\d|$)/i.test(model)
 
     const subscribeNothing = () => () => {}
     const snapshotNothing = () => null
@@ -62,7 +62,7 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(null)
       const [pending, setPending] = useState(false)
       const [error, setError] = useState(false)
-      /** The session's live model provider ('openai' | … | null while unknown). */
+      /** The session's live provider/model pair, null while unknown. */
       const provider = useSyncExternalStore(
         providerStore ? (onChange) => providerStore.subscribe(onChange) : subscribeNothing,
         providerStore ? () => providerStore.getSnapshot() : snapshotNothing,
@@ -125,30 +125,31 @@ window.__ModuleLoader__.load({
 
         return null
       }
-      if (state.providerAvailable === false) {
-
-        return null
-      }
-      // Only OpenAI models ride this transport; other providers never see the button.
-      // A blank session has no projection yet; the composer shows the default model then.
+      // A blank session uses the default selection as a pair. Never combine a
+      // selected provider with a different provider's default model or endpoint.
       const current = provider?.provider ?? state.defaultProvider ?? null
-      if (!providerStore || current !== TARGET_PROVIDER) {
+      const model = provider?.provider ? provider.model : state.defaultModel
+      const routes = Array.isArray(state.providers)
+        ? state.providers
+        : state.providerAvailable === false ? [] : [{ provider: 'openai', endpoint: state.endpoint }]
+      const route = routes.find((entry) => entry.provider === current)
+      if (!providerStore || !route || (current !== 'openai' && !isGptModel(model))) {
         return null
       }
 
       const mode = state.transport === 'sse' ? 'sse' : 'ws'
       const host = (() => {
         try {
-          return new URL(state.endpoint?.baseURL ?? '').host
+          return new URL(route.endpoint?.baseURL ?? '').host
         } catch {
           return ''
         }
       })()
-      const keyHint = state.endpoint?.hasKey === false ? '（尚未解析到 API Key，WS 不会生效）' : ''
+      const keyHint = route.endpoint?.hasKey === false ? '（尚未解析到 API Key，WS / Fast 不会生效）' : ''
       const title =
         state.transport === 'sse'
-          ? `SSE 流式（${state.fast ? 'Fast：插件 Responses 接口，仅文本' : 'openai 渠道直连'}）· 点击让 OpenAI 模型改走 WS 模式${host ? `（${host}）` : ''}${keyHint}`
-          : `WS 模式 · OpenAI 模型经 ${host || '中转站'} WebSocket 传输 · 点击切回 SSE 流式${keyHint}`
+          ? `SSE 流式（${state.fast ? 'Fast：插件 Responses 接口，仅文本' : `${current} 渠道直连`}）· 点击改走 WS 模式${host ? `（${host}）` : ''}${keyHint}`
+          : `WS 模式 · ${current} 渠道经 ${host || '中转站'} WebSocket 传输 · 点击切回 SSE 流式${keyHint}`
       return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, h(
         'button',
         {
@@ -178,14 +179,16 @@ window.__ModuleLoader__.load({
       }, ICONS.ws, 'Fast'))
     }
 
-    /** Wrap any {subscribe,getSnapshot} source into a referentially stable provider snapshot. */
+    /** Track model changes even when the selected provider stays the same. */
     function providerStoreOf(source, read) {
-      let last = { provider: null }
+      let last = { provider: null, model: null }
       return {
         subscribe: (onChange) => source.subscribe(onChange),
         getSnapshot: () => {
-          const provider = read(source.getSnapshot()) ?? null
-          if (last.provider !== provider) last = { provider }
+          const selection = read(source.getSnapshot())
+          const provider = selection?.provider ?? null
+          const model = selection?.model ?? null
+          if (last.provider !== provider || last.model !== model) last = { provider, model }
           return last
         },
       }
@@ -215,7 +218,7 @@ window.__ModuleLoader__.load({
                   const face = ctx.sessions.binding(sessionId).session.projections.faceOf('modelSelection')
                   if (face !== undefined && typeof face.subscribe === 'function') {
 
-                    return { providerStore: providerStoreOf(face, (snap) => snap?.next?.provider) }
+                    return { providerStore: providerStoreOf(face, (snap) => snap?.next) }
                   }
 
                 } catch (error) {

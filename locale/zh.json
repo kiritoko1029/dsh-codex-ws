@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Codex WS",
-    "description": "拦截 OpenAI 渠道，使其适配 Responses WebSocket 模式，旨在降低首字延迟、减少官方 API 的 503 重连报错，并支持开启 Fast 模式。"
+    "description": "支持 OpenAI 及兼容第三方渠道的 GPT 模型，使用当前渠道的地址与凭据切换 Responses WebSocket 模式，旨在降低首字延迟、减少官方 API 的 503 重连报错，并支持开启 Fast 模式。"
   }
 }

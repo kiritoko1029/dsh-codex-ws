@@ -2,16 +2,16 @@
  * dsh-codex-ws — GPT models over the Codex-style Responses WebSocket transport.
  *
  * The plugin does NOT register a parallel model channel. Instead it intercepts the
- * harness `llm/stream` waterfall for the existing `openai` provider: while the
+ * harness `llm/stream` waterfall for supported provider routes: while the
  * transport toggle is on (websocket / auto), those requests speak the Responses
  * protocol over WebSocket ("WS 模式", Codex CLI `supports_websockets`) against the
- * current DSH OpenAI endpoint and credentials (or a complete explicit plugin
- * override). No Codex CLI configuration is read. SSE mode passes the
- * request through to the normal openai adapter untouched, so OpenAI models stay a
- * single channel and non-OpenAI models never see the toggle at all.
+ * current request's DSH endpoint and credentials (or a complete explicit plugin
+ * override). No Codex CLI configuration is read. SSE mode passes GPT requests
+ * through to the normal adapter untouched when Fast is off, so models stay on
+ * a single channel.
  *
- * A composer toolbar button (client half, shown only while the session's model is
- * an OpenAI one) flips the transport at runtime through POST /codex-ws/state; the
+ * A composer toolbar button (client half, shown for eligible GPT routes) flips
+ * the transport at runtime through POST /codex-ws/state; the
  * choice is persisted in $DSH_HOME/codex-ws/state.json and applies from the next
  * model step. The API key never reaches the browser.
  */
@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Config, resolveSettings, hasOverride, TARGET_PROVIDER, TRANSPORTS } from './lib/config.js'
+import { eligibleProviderRoutes, eligibleRequest } from './lib/providers.js'
 import { ResponseStreamMapper, buildCreateBody, projectOptions, abortedFinish, errorFinish } from './lib/responses.js'
 import { runTransport, closeIdleSockets, TransportError } from './lib/transport.js'
 
@@ -117,19 +118,38 @@ export function apply(ctx, config) {
   }
   loadState()
 
-  /**
-   * The DSH OpenAI provider's live endpoint and bearer credential, resolved the
-   * same way the pi-ai adapter resolves them: the configurable-provider
-   * directory names the settings namespace and profile path; the profile holds
-   * an optional baseURL (falling back to the route's catalog default) and an
-   * apiKeyEnv credential reference resolved through the credentials service
-   * (with the launch environment as a secondary source). Re-read per request
-   * so channel edits apply without a restart; every failure is contained and
-   * surfaces as the inherited-mode configuration error.
-   */
-  const inheritedProvider = async () => {
+  /** Registered routes with a protocol and credential this transport can own. */
+  const eligibleRoutes = () => {
     try {
-      const entry = ctx.llm.listConfigurableProviders().find((provider) => provider.provider === TARGET_PROVIDER)
+      const registered = ctx.llm.listProviders()
+      const namespaces = ctx.settings?.describe({ redactSecrets: true }) ?? []
+      const routes = typeof ctx.llm.listConfigurableProviders === 'function' ? eligibleProviderRoutes(
+        ctx.llm.listConfigurableProviders(),
+        registered,
+        (entry) => {
+          let value = namespaces.find((candidate) => candidate.ns === entry.settingsNs)?.value
+          for (const key of entry.settingsPath ?? []) value = value?.[key]
+          return value
+        },
+      ) : []
+      // Preserve the legacy intercept for the built-in OpenAI route even in
+      // compositions which do not expose a settings/configurable directory.
+      if (!routes.some((route) => route.provider === TARGET_PROVIDER) &&
+          (registered.some((provider) => provider.id === TARGET_PROVIDER) || hasOverride(config))) {
+        routes.unshift({ provider: TARGET_PROVIDER, entry: undefined })
+      }
+      return routes
+    } catch {
+      // Discovery failures cannot silently reroute a previously intercepted
+      // OpenAI request to its native adapter or another credential plane.
+      return [{ provider: TARGET_PROVIDER, entry: undefined }]
+    }
+  }
+
+  const inheritedProvider = async (route) => {
+    // Resolve the same settings path used for eligibility, on every request.
+    try {
+      const entry = route?.entry ?? ctx.llm.listConfigurableProviders?.().find((provider) => provider.provider === TARGET_PROVIDER)
       if (!entry) return {}
       let profile = {}
       try {
@@ -193,9 +213,10 @@ export function apply(ctx, config) {
 
   /** Live settings plus the effective transport; the inherited endpoint and
    * credential resolve asynchronously through the DSH services. */
-  const runtime = async () => {
-    const provider = hasOverride(config) ? {} : await inheritedProvider()
-    const settings = { ...resolveSettings(config, provider), fast: state.fast }
+  const runtime = async (route) => {
+    const providerId = route?.provider ?? TARGET_PROVIDER
+    const provider = hasOverride(config) ? {} : await inheritedProvider(route)
+    const settings = { ...resolveSettings(config, provider, providerId), fast: state.fast }
     return { settings, transport: state.override ?? settings.transport }
   }
 
@@ -226,16 +247,29 @@ export function apply(ctx, config) {
    * checkpointing, …) stay outside this veto and keep running.
    */
   ctx.on('llm/stream', (options, next) => {
-    if (options?.provider !== TARGET_PROVIDER) return next()
+    const route = options?.provider === TARGET_PROVIDER
+      ? { provider: TARGET_PROVIDER, entry: undefined }
+      : eligibleRequest(eligibleRoutes(), options)
+    if (route === undefined) return next()
     const { transport, fast } = runtimeSync()
     if (transport === 'sse' && !fast) return next()
     // Fail closed for incomplete overrides or unavailable inherited configuration.
     // Never silently change endpoint, account, or requested transport.
-    return interceptedStream(options, runtime, fileReadPath)
+    return interceptedStream(options, () => runtime(route), fileReadPath)
   })
 
   const publicState = async () => {
-    const { settings, transport } = await runtime()
+    const routes = eligibleRoutes()
+    const providers = await Promise.all(routes.map(async (route) => {
+      const { settings } = await runtime(route)
+      return {
+        provider: route.provider,
+        endpoint: { baseURL: settings.baseURL, hasKey: settings.apiKey.length > 0 },
+      }
+    }))
+    const defaultRoute = providers.find((route) => route.provider === TARGET_PROVIDER) ?? providers[0]
+    const legacyRuntime = defaultRoute === undefined ? await runtime() : undefined
+    const { transport } = runtimeSync()
     let providerAvailable = true
     try {
       providerAvailable = ctx.llm.listProviders().some((provider) => provider.id === TARGET_PROVIDER)
@@ -245,19 +279,23 @@ export function apply(ctx, config) {
     // A blank session has no model-selection projection yet; the composer then shows the
     // default model, so the client falls back to this provider id (and nothing else).
     let defaultProvider = null
+    let defaultModel = null
     try {
       const selection = ctx.get('agentDefaultModel')?.currentSelection()
       if (typeof selection?.provider === 'string') defaultProvider = selection.provider
+      if (typeof selection?.model === 'string') defaultModel = selection.model
     } catch {
       /* optional service */
     }
     return {
       provider: TARGET_PROVIDER,
       transport,
-      fast: settings.fast,
-      endpoint: { baseURL: settings.baseURL, hasKey: settings.apiKey.length > 0 },
+      fast: state.fast,
+      endpoint: defaultRoute?.endpoint ?? { baseURL: legacyRuntime.settings.baseURL, hasKey: legacyRuntime.settings.apiKey.length > 0 },
       providerAvailable,
       defaultProvider,
+      defaultModel,
+      providers,
     }
   }
 
