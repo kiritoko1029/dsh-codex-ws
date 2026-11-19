@@ -30,13 +30,21 @@ WS / SSE 按钮旁新增独立 **Fast** 按钮，默认关闭，开启后高亮�
 
 ## 安装
 
-可运行 `npm pack dsh-codex-ws@1.4.0 --registry=https://registry.npmjs.org` 获取安装包，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
+可运行 `npm pack dsh-codex-ws@1.5.0 --registry=https://registry.npmjs.org` 获取安装包，在 DSH 插件管理中安装本地包；或克隆仓库后从本地目录安装。安装后刷新插件和界面。
 
 ## 界面预览
 
 ![DSH 实际输入框中的 WS/SSE 与 Fast 开关及功能说明](assets/codex-ws-real-ui.png)
 
 图片基于真实 DSH 截图裁剪与放大。WS 连接复用旨在降低首字延迟、减少官方 API 的 503 重连报错；实际效果取决于网络与服务端。Fast 请求优先处理，需服务端支持，可能额外计费。
+
+### v1.5.0 更新说明
+
+- **带图对话**：支持视觉的模型在 WS / auto / SSE + Fast 下直接收到用户上传与工具返回的图片（`input_image`），按所选渠道的尺寸与字节预算准备，保留图文顺序；纯文本模型和已卸载的历史图片仍使用占位文字。
+- **保留 developer 消息**：不再丢弃 `developer` 文本，保持其原本角色与历史位置；工具声明使用当前有效列表。
+- **Max 档位**：选择 Max 时原样发送 `reasoning.effort: "max"`，需服务端支持该档位。
+- **多轮续接更可靠**：部分中转逐项发送 `response.output_item.done` 而最终 `response.completed.output` 为空时，只有在所有输出项都能按索引与 ID 严格配对后才建立续接记录；带图历史的前缀校验改用 SHA-256 摘要，空闲连接不再持有整张图片的 base64。
+- 离线回归覆盖混合图文、工具返回图片、附件读取失败、历史图片卸载、Max 透传与多轮续接。
 
 ### v1.4.0 更新说明
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ws",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "GPT models on OpenAI and compatible third-party providers over the Codex-style Responses WebSocket transport, with in-composer WS/SSE and Fast toggles using the selected provider's endpoint and credentials.",
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "scripts": {
