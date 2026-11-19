@@ -59,6 +59,22 @@ const next = () => {
   return nextMarker
 }
 
+// An unreadable image terminates locally before a transport can open.
+{
+  fakeCtx.llm.resolveModelInfo = async () => ({ inputModalities: ['image', 'text'] })
+  const request = { provider: 'openai', model: 'gpt-test', messages: [
+    { role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'sha256:abcd' } }] },
+  ] }
+  const result = []
+  for await (const chunk of streamListener(request, next)) result.push(chunk)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].reason.kind, 'error')
+  assert.match(result[0].reason.failure.message, /attachment service is unavailable/)
+  for await (const chunk of streamListener({ ...request, signal: AbortSignal.abort() }, next)) {
+    assert.equal(chunk.reason.kind, 'aborted')
+  }
+}
+
 // --- non-openai providers always pass through -----------------------------------------------
 for (const provider of ['deepseek-official', 'zai-coding-cn', 'anthropic', 'openai-codex']) {
   nextCalls = 0

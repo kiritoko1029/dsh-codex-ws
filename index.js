@@ -58,7 +58,7 @@ function writeState(state) {
 // ---------------------------------------------------------------------------------------------
 
 /** One openai-provider request over the Codex-style transport; yields harness chunks. */
-async function* interceptedStream(options, resolveRuntime, resolvePath) {
+async function* interceptedStream(options, resolveRuntime, projection) {
   const { settings, transport } = await resolveRuntime()
   if (settings.configurationError) {
     yield {
@@ -73,10 +73,12 @@ async function* interceptedStream(options, resolveRuntime, resolvePath) {
     }
     return
   }
-  const projected = projectOptions(options, resolvePath)
-  const { body, requestId } = buildCreateBody(settings, projected, { transport })
   const mapper = new ResponseStreamMapper()
   try {
+    options.signal?.throwIfAborted()
+    const projected = await projectOptions(options, projection)
+    options.signal?.throwIfAborted()
+    const { body, requestId } = buildCreateBody(settings, projected, { transport })
     for await (const event of runTransport(settings, transport, { body, requestId, sessionId: options.sessionId, signal: options.signal })) {
       for (const chunk of mapper.handleEvent(event)) yield chunk
     }
@@ -88,6 +90,11 @@ async function* interceptedStream(options, resolveRuntime, resolvePath) {
   } catch (error) {
     if (options.signal?.aborted) {
       yield abortedFinish()
+      return
+    }
+    if (error?.code === 'IMAGE_OFFLOAD_REQUIRED') {
+      const { code, message, offloadImages } = error
+      yield { type: 'finish', reason: { kind: 'error', failure: { code, message, offloadImages } } }
       return
     }
     if (error instanceof TransportError && error.phase === 'connect' && transport === 'websocket') {
@@ -111,6 +118,12 @@ export function apply(ctx, config) {
   const connection = Reflect.get(ctx, 'connection')
   const state = { override: null, fast: false }
 
+  const routeProfile = (entry, namespaces = ctx.settings?.describe({ redactSecrets: true })) => {
+    let value = namespaces?.find((candidate) => candidate.ns === entry?.settingsNs)?.value
+    for (const key of entry?.settingsPath ?? []) value = value?.[key]
+    return value ?? {}
+  }
+
   const loadState = () => {
     const stored = readState()
     state.override = TRANSPORTS.includes(stored.transport) ? stored.transport : null
@@ -126,11 +139,7 @@ export function apply(ctx, config) {
       const routes = typeof ctx.llm.listConfigurableProviders === 'function' ? eligibleProviderRoutes(
         ctx.llm.listConfigurableProviders(),
         registered,
-        (entry) => {
-          let value = namespaces.find((candidate) => candidate.ns === entry.settingsNs)?.value
-          for (const key of entry.settingsPath ?? []) value = value?.[key]
-          return value
-        },
+        (entry) => routeProfile(entry, namespaces),
       ) : []
       // Preserve the legacy intercept for the built-in OpenAI route even in
       // compositions which do not expose a settings/configurable directory.
@@ -153,12 +162,7 @@ export function apply(ctx, config) {
       if (!entry) return {}
       let profile = {}
       try {
-        const namespace = ctx.settings
-          ?.describe({ redactSecrets: true })
-          .find((candidate) => candidate.ns === entry.settingsNs)
-        let value = namespace?.value
-        for (const key of entry.settingsPath ?? []) value = value?.[key]
-        profile = value !== null && typeof value === 'object' ? value : {}
+        profile = routeProfile(entry)
       } catch {
         /* settings service unavailable: fall back to the catalog default */
       }
@@ -255,7 +259,17 @@ export function apply(ctx, config) {
     if (transport === 'sse' && !fast) return next()
     // Fail closed for incomplete overrides or unavailable inherited configuration.
     // Never silently change endpoint, account, or requested transport.
-    return interceptedStream(options, () => runtime(route), fileReadPath)
+    const { provider, model, signal } = options
+    return interceptedStream(options, () => runtime(route), {
+      resolvePath: fileReadPath,
+      modelInfo: () => ctx.llm.resolveModelInfo(provider, model, signal),
+      imageLimits: () => routeProfile(route.entry ?? ctx.llm.listConfigurableProviders?.().find((p) => p.provider === provider)),
+      readImage: (ref) => {
+        const store = ctx.get('attachments')
+        if (!store?.readImageRequest) throw new Error('DSH image attachment service is unavailable')
+        return store.readImageRequest(ref, ctx.llm.imageRequestTarget(provider, model, ref), signal)
+      },
+    })
   })
 
   const publicState = async () => {

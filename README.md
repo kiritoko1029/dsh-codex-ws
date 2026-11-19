@@ -7,7 +7,7 @@
 - **不新增模型渠道**。插件拦截 harness 的 `llm/stream` 水流：传输开关为 websocket / auto 时，OpenAI 渠道和兼容第三方渠道的 GPT 请求改走该渠道 `<baseURL>/responses` 的 Codex 风格传输；切回 SSE 且 Fast 关闭时原样放行给该渠道原有适配器。
   - **WS 模式**：`wss://<baseURL>/responses`，发送 `{ "type": "response.create", ... }` 后接收与 SSE 完全相同的 Responses 事件流；连接按池复用（干净结束后保留 3 分钟，50 分钟强制换新）。
   - **SSE 模式**：Fast 关闭时不拦截，走 DSH 当前渠道原有的流式请求（auto 模式下的回退则是普通 `POST /responses` + `stream: true` 打到同一中转站）。
-  - 拦截层复刻了适配器边界的投影（文件 → 可读路径句柄、图片 → 文本占位、developer 消息丢弃、deferLoading 工具声明展开），WS 路径目前仅发送文本，不会把图片原始内容发送给模型；不能视为与原生多模态适配器完全等价。
+  - 支持视觉的模型可以直接读取用户和工具返回的图片。插件使用 DSH 附件服务按当前渠道的尺寸与字节预算准备图片，通过 `input_image` 发送，并遵守历史图片的卸载标记。开发者文本保留原位置和角色，当前工具声明随请求发送。选择 `max` 会发送 `reasoning.effort: "max"`，需要服务端支持该档位。
 - **默认继承 DSH 当前所选渠道的接口地址与凭据**：通过 `llm/listConfigurableProviders` 定位请求所属路由的设置命名空间与 profile 路径，读取其 `baseURL`（缺省用渠道默认地址），`apiKeyEnv` 凭据引用经 credentials 服务解析。每次请求重新读取，渠道配置改动即时生效；第三方渠道不会回退借用 OpenAI 渠道的地址或 Key，不读取本地 Codex CLI 配置，也没有写死的中转地址。
 - 插件的 `baseURL` / `apiKey` / `apiKeyEnv` / `envFile` 留空即可继承。显式填写任意一项会进入独立覆盖模式，必须同时提供接口地址和 Key，不会与 DSH 的地址或凭据混用。
   - 覆盖模式 Key 顺序：`apiKey` → `envFile` 中对应变量 → 显式指定的 `apiKeyEnv` 环境变量。
@@ -24,7 +24,7 @@
 WS / SSE 按钮旁新增独立 **Fast** 按钮，默认关闭，开启后高亮。开关与传输模式分别保存，全局影响所有符合条件的 OpenAI / GPT 请求，从下一次模型请求生效，重启后保留。
 
 - 开启时发送 `service_tier: "priority"`，不改变模型、推理强度或输出长度；是否支持、实际速度和额外费用由服务端决定。
-- WS / auto 及 auto 回退 SSE 均保留该参数。**SSE + Fast 由插件发起 Responses 请求，默认继承当前所选渠道的端点与凭据**，并继承插件的仅文本投影限制。关闭 Fast 后 SSE 恢复原样放行。
+- WS / auto 及 auto 回退 SSE 均保留该参数。**SSE + Fast 由插件发起 Responses 请求，默认继承当前所选渠道的端点与凭据**，使用与 WS 相同的图片和消息处理逻辑。关闭 Fast 后 SSE 恢复原样放行。
 - WS / auto / SSE + Fast 配置不完整时明确报错，不静默丢弃优先处理参数。切换 Fast 后增量 WS 请求配置指纹改变，自动全量发送。
 - 离线验证：`node test/fast.mjs`（不调用真实 API）。
 

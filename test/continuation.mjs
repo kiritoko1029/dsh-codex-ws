@@ -9,6 +9,13 @@ const next = { ...base, input: [...base.input, ...output, user('again')] }
 const completed = (id = 'r1', out = output) => ({ type: 'response.completed', response: { id, output: out } })
 const state = commitContinuation(base, completed().response, 's1')
 assert.equal(continuationBody(next, state, 's1').previous_response_id, 'r1')
+const picture = (url) => ({ type: 'message', role: 'user', content: [{ type: 'input_image', image_url: url }] })
+const imageBase = { ...base, input: [picture('data:image/png;base64,AQ==')] }
+const imageState = commitContinuation(imageBase, completed('image1').response, 's1')
+const imageNext = { ...base, input: [...imageBase.input, ...output, user('again')] }
+assert.deepEqual(continuationBody(imageNext, imageState, 's1').input, [user('again')])
+assert.equal(continuationBody({ ...imageNext, input: [picture('data:image/png;base64,Ag=='), ...output, user('again')] }, imageState, 's1').previous_response_id, undefined)
+assert.ok(imageState.prefix.every((value) => /^[a-f0-9]{64}$/.test(value)))
 assert.equal(continuationBody(next, state, 's2'), next)
 assert.equal(continuationBody({ ...next, model: 'other' }, state, 's1').previous_response_id, undefined)
 assert.equal(continuationBody({ ...next, input: [user('changed'), ...output, user('again')] }, state, 's1').previous_response_id, undefined)
@@ -40,6 +47,22 @@ const collect = async (body, sessionId='s1', transport='websocket', signal) => {
 const respond = (...events) => (socket) => queueMicrotask(() => events.forEach((e) => socket.message(e)))
 try {
  globalThis.WebSocket = FakeWebSocket
+ // A relay may finish each item separately and omit them from the terminal snapshot.
+ const added = {type:'response.output_item.added',output_index:0,item:{id:'m1',type:'message'}}
+ const done = {type:'response.output_item.done',output_index:0,item:{id:'m1',...output[0]}}
+ for (const [name, events, expected] of [
+   ['complete', [added, done], 'thin'],
+   ['unfinished', [added], undefined],
+   ['mismatched', [added, {...done,item:{...done.item,id:'m2'}}], undefined],
+   ['duplicate', [added, done, done], undefined],
+ ]) {
+   scripts.push(respond(...events, completed('thin', [])), respond(completed()))
+   await collect(base, name)
+   await collect(next, name)
+   assert.equal(sockets.at(-1).sent[1].previous_response_id, expected)
+ }
+ closeIdleSockets()
+ sockets = []
  scripts.push(respond(completed()))
  await collect(base)
  scripts.push(respond(completed('r2')))
