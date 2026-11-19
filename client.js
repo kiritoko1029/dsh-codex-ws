@@ -148,7 +148,7 @@ window.__ModuleLoader__.load({
       const keyHint = route.endpoint?.hasKey === false ? '（尚未解析到 API Key，WS / Fast 不会生效）' : ''
       const title =
         state.transport === 'sse'
-          ? `SSE 流式（${state.fast ? 'Fast：插件 Responses 接口，仅文本' : `${current} 渠道直连`}）· 点击改走 WS 模式${host ? `（${host}）` : ''}${keyHint}`
+          ? `SSE 流式（${state.fast ? 'Fast：插件 Responses 接口' : `${current} 渠道直连`}）· 点击改走 WS 模式${host ? `（${host}）` : ''}${keyHint}`
           : `WS 模式 · ${current} 渠道经 ${host || '中转站'} WebSocket 传输 · 点击切回 SSE 流式${keyHint}`
       return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, h(
         'button',
@@ -174,7 +174,7 @@ window.__ModuleLoader__.load({
         'aria-pressed': state.fast === true,
         'aria-label': 'Fast 模式',
         disabled: pending,
-        title: `Fast 模式${state.fast === true ? '已开启 · 点击关闭' : '已关闭 · 点击开启'}：优先处理（service_tier=priority），可能额外计费，需中转站支持。全局生效，下一次请求使用；SSE 下使用插件 Responses 接口（仅文本）。`,
+        title: `Fast 模式${state.fast === true ? '已开启 · 点击关闭' : '已关闭 · 点击开启'}：优先处理（service_tier=priority），可能额外计费，需中转站支持。全局生效，下一次请求使用；SSE 下使用插件 Responses 接口。`,
         onClick: () => toggle('fast'),
       }, ICONS.ws, 'Fast'))
     }
